@@ -39,25 +39,25 @@ function App() {
     if (savedTheme) return savedTheme;
 
     // Then check system preference
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark';
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+      return 'light';
     }
-    return 'light';
+    return 'dark';
   });
   const quantityHistoryRef = useRef({ bids: [], asks: [] });
   const statsRef = useRef({
     bids: { mean: 0, stdDev: 0 },
     asks: { mean: 0, stdDev: 0 }
   });
-  const [playBidNext, setPlayBidNext] = useState(true);
+  const playBidNext = useRef(true);
 
   // Listen for system theme changes
   useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
     const handleChange = (e) => {
       const savedTheme = localStorage.getItem('theme');
       if (!savedTheme) {
-        setTheme(e.matches ? 'dark' : 'light');
+        setTheme(e.matches ? 'light' : 'dark');
       }
     };
 
@@ -259,19 +259,17 @@ function App() {
         // Play sound for one of them based on alternating pattern
         if (bidQty > 0 || askQty > 0) {
           if (bidQty > 0 && askQty > 0) {
-            // Both have updates, use alternating pattern
-            if (playBidNext) {
-              playSound(bidQty, true, currentToneTime);
-            } else {
-              playSound(askQty, false, currentToneTime);
+            console.log(`Both have updates, play alternating: ${playBidNext.current ? 'bid' : 'ask'}`);
+            if (playSound(playBidNext.current ? bidQty : askQty, playBidNext.current, currentToneTime)) {
+              const rand = Math.random() < 0.5;
+              playBidNext.current = rand;
             }
-            setPlayBidNext(!playBidNext);
           } else {
             // Only one has an update, play that one
-            if (bidQty > 0) {
-              playSound(bidQty, true, currentToneTime);
-            } else {
-              playSound(askQty, false, currentToneTime);
+            console.log(`Only one has an update, play that one: ${bidQty > 0 ? 'bid' : 'ask'}`);
+            let playBid = bidQty > 0;
+            if (playSound(playBid ? bidQty : askQty, playBid, currentToneTime)) {
+              playBidNext.current = Math.random() < 0.5;
             }
           }
         }
