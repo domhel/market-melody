@@ -107,56 +107,6 @@ function App() {
     };
   }, []);
 
-  const getNewOrderQuantity = (currentQty, prevQty) => {
-    const current = parseFloat(currentQty);
-    const prev = parseFloat(prevQty);
-    // If quantity increased, return the difference
-    if (current > prev) {
-      return current - prev;
-    }
-    // If quantity decreased or stayed same, return 0
-    return 0;
-  };
-
-  const processMarketData = (newData, prevData) => {
-    const newBidQty = getNewOrderQuantity(newData.B, prevData.B);
-    const newAskQty = getNewOrderQuantity(newData.A, prevData.A);
-    
-    let orderUpdate = null;
-    
-    if (newBidQty > 0 || newAskQty > 0) {
-      const isBid = newBidQty > newAskQty;
-      const quantity = isBid ? newBidQty : newAskQty;
-      
-      orderUpdate = {
-        type: isBid ? 'bids' : 'asks',
-        quantity,
-        price: isBid ? newData.b : newData.a
-      };
-    }
-    
-    return {
-      orderUpdate,
-      priceUpdates: {
-        bidChanged: newData.b !== prevData.b,
-        askChanged: newData.a !== prevData.a
-      }
-    };
-  };
-
-  const handleOrderUpdate = (orderUpdate, updateStats, playSound) => {
-    if (!orderUpdate) return;
-    
-    const { type, quantity } = orderUpdate;
-    const isBid = type === 'bids';
-    
-    // Update statistics
-    updateStats(quantity, isBid);
-    
-    // Play sound
-    playSound(quantity, isBid);
-  };
-
   const updateStats = useCallback((newQuantity, isBid) => {
     setQuantityHistory(prev => {
       const type = isBid ? 'bids' : 'asks';
@@ -261,7 +211,6 @@ function App() {
   useEffect(() => {
     let ws = null;
     let lastMessageTime = 0;
-    let isSubscribed = false;
 
     const connectWebSocket = () => {
       if (!isPlaying) return;
@@ -276,17 +225,14 @@ function App() {
       
       ws.onopen = () => {
         console.log(`WebSocket connected for ${selectedSymbol}`);
-        isSubscribed = true;
       };
 
       ws.onclose = () => {
         console.log(`WebSocket disconnected for ${selectedSymbol}`);
-        isSubscribed = false;
       };
 
       ws.onerror = (error) => {
         console.error(`WebSocket error for ${selectedSymbol}:`, error);
-        isSubscribed = false;
       };
       
       ws.onmessage = (event) => {
@@ -356,7 +302,6 @@ function App() {
 
     return () => {
       if (ws) {
-        isSubscribed = false;
         ws.close();
       }
     };
