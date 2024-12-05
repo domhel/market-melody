@@ -205,15 +205,17 @@ function App() {
     const normalized = (clampedZScore + 2) / 4; // Maps [-2,2] to [0,1]
     
     // Calculate index based on whether it's a bid or ask
-    let index;
     const halfLength = Math.floor(pentatonicNotes.length / 2);
+    let index;
     
     if (isBid) {
-      // Bids use upper half (map normalized to [halfLength, length-1])
+      // Bids use upper half [halfLength to length-1]
       index = halfLength + Math.floor(normalized * (pentatonicNotes.length - halfLength));
     } else {
-      // Asks use lower half (map normalized to [0, halfLength-1])
-      index = Math.floor(normalized * halfLength);
+      // Asks use lower half [0 to halfLength-1]
+      // Invert the normalized value for asks to maintain the same relationship with z-score
+      const invertedNormalized = 1 - normalized;
+      index = Math.floor(invertedNormalized * halfLength);
     }
     
     // Ensure index stays within bounds
@@ -299,9 +301,9 @@ function App() {
         // 1. Update UI with current data
         setMarketData(data);
         
-        // 2. Process order quantities and update stats
-        const newBidQty = getNewOrderQuantity(data.B, prevMarketData.B);
-        const newAskQty = getNewOrderQuantity(data.A, prevMarketData.A);
+        // 2. Get current quantities directly
+        const bidQty = parseFloat(data.B);
+        const askQty = parseFloat(data.A);
         
         // Update flash animations for price changes
         if (data.b !== prevMarketData.b) {
@@ -316,32 +318,32 @@ function App() {
         // 3. Process both bid and ask updates
         const currentToneTime = now();
         
-        // Always update statistics for both if they have updates
-        if (newBidQty > 0) {
-          console.log('New bid quantity:', newBidQty, 'Previous:', prevMarketData.B, 'Current:', data.B);
-          updateStats(newBidQty, true);
+        // Always update statistics for both
+        if (bidQty > 0) {
+          console.log('Bid quantity:', bidQty);
+          updateStats(bidQty, true);
         }
-        if (newAskQty > 0) {
-          console.log('New ask quantity:', newAskQty, 'Previous:', prevMarketData.A, 'Current:', data.A);
-          updateStats(newAskQty, false);
+        if (askQty > 0) {
+          console.log('Ask quantity:', askQty);
+          updateStats(askQty, false);
         }
 
         // Play sound for one of them based on alternating pattern
-        if (newBidQty > 0 || newAskQty > 0) {
-          if (newBidQty > 0 && newAskQty > 0) {
+        if (bidQty > 0 || askQty > 0) {
+          if (bidQty > 0 && askQty > 0) {
             // Both have updates, use alternating pattern
             if (playBidNext) {
-              playSound(newBidQty, true, currentToneTime);
+              playSound(bidQty, true, currentToneTime);
             } else {
-              playSound(newAskQty, false, currentToneTime);
+              playSound(askQty, false, currentToneTime);
             }
             setPlayBidNext(!playBidNext);
           } else {
             // Only one has an update, play that one
-            if (newBidQty > 0) {
-              playSound(newBidQty, true, currentToneTime);
+            if (bidQty > 0) {
+              playSound(bidQty, true, currentToneTime);
             } else {
-              playSound(newAskQty, false, currentToneTime);
+              playSound(askQty, false, currentToneTime);
             }
           }
         }
