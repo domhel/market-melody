@@ -53,6 +53,7 @@ function App() {
     bids: { mean: 0, stdDev: 0 },
     asks: { mean: 0, stdDev: 0 }
   });
+  const [playBidNext, setPlayBidNext] = useState(true);
 
   // Listen for system theme changes
   useEffect(() => {
@@ -186,49 +187,38 @@ function App() {
     const type = isBid ? 'bids' : 'asks';
     const stats = statsRef.current[type];
     
-    // If we don't have enough data yet, use a default mapping
+    // If we don't have enough data yet, use middle of appropriate half
     if (quantityHistory[type].length < 2) {
-      return pentatonicNotes[MIDDLE_NOTE_INDEX];
+      if (isBid) {
+        return pentatonicNotes[Math.floor(pentatonicNotes.length * 0.75)]; // Middle of upper half
+      } else {
+        return pentatonicNotes[Math.floor(pentatonicNotes.length * 0.25)]; // Middle of lower half
+      }
     }
 
     // Calculate z-score
     const zScore = (quantity - stats.mean) / (stats.stdDev || 1);
+    // Clamp z-score to reasonable range (-2 to 2)
+    const clampedZScore = Math.max(-2, Math.min(2, zScore));
     
-    // Map z-score to [0,1] range using a modified approach
-    // This will give more spread across the available notes
-    let normalized;
-    if (Math.abs(zScore) <= 0.5) {
-      // Within 0.5 standard deviation - map to middle fifth of range
-      normalized = 0.4 + (zScore + 0.5) * 0.2; // Maps [-0.5,0.5] to [0.4,0.6]
-    } else if (Math.abs(zScore) <= 1.5) {
-      // Between 0.5 and 1.5 standard deviations
-      if (zScore > 0) {
-        normalized = 0.6 + (zScore - 0.5) * 0.2; // Maps [0.5,1.5] to [0.6,0.8]
-      } else {
-        normalized = 0.4 - (Math.abs(zScore) - 0.5) * 0.2; // Maps [-1.5,-0.5] to [0.2,0.4]
-      }
-    } else {
-      // Beyond 1.5 standard deviations
-      if (zScore > 0) {
-        normalized = Math.min(1, 0.8 + (zScore - 1.5) * 0.133); // Maps [1.5,∞] to [0.8,1]
-      } else {
-        normalized = Math.max(0, 0.2 - (Math.abs(zScore) - 1.5) * 0.133); // Maps [-∞,-1.5] to [0,0.2]
-      }
-    }
+    // Map z-score to [0,1] range for the appropriate half
+    const normalized = (clampedZScore + 2) / 4; // Maps [-2,2] to [0,1]
     
     // Calculate index based on whether it's a bid or ask
     let index;
     const halfLength = Math.floor(pentatonicNotes.length / 2);
+    
     if (isBid) {
-      // Bids use upper half of notes
-      index = halfLength + Math.floor(normalized * halfLength);
+      // Bids use upper half (map normalized to [halfLength, length-1])
+      index = halfLength + Math.floor(normalized * (pentatonicNotes.length - halfLength));
     } else {
-      // Asks use lower half of notes
+      // Asks use lower half (map normalized to [0, halfLength-1])
       index = Math.floor(normalized * halfLength);
     }
     
     // Ensure index stays within bounds
-    index = Math.max(0, Math.min(pentatonicNotes.length - 1, index));
+    index = Math.max(isBid ? halfLength : 0, 
+                    Math.min(isBid ? pentatonicNotes.length - 1 : halfLength - 1, index));
     
     console.log(`${type.toUpperCase()} Note mapping - Quantity: ${quantity.toFixed(2)}, Z-Score: ${zScore.toFixed(2)}, Normalized: ${normalized.toFixed(2)}, Index: ${index}, StdDev: ${stats.stdDev.toFixed(2)}`);
     return pentatonicNotes[index];
@@ -251,14 +241,51 @@ function App() {
     }
   };
 
+  const handleSymbolChange = (newSymbol) => {
+    // Reset statistics and history for the new symbol
+    setQuantityHistory({
+      bids: [],
+      asks: []
+    });
+    statsRef.current = {
+      bids: { mean: 0, stdDev: 0 },
+      asks: { mean: 0, stdDev: 0 }
+    };
+    setPrevMarketData({ b: '0', B: '0', a: '0', A: '0' });
+    setMarketData({ b: '0', B: '0', a: '0', A: '0' });
+    setSelectedSymbol(newSymbol);
+  };
+
   useEffect(() => {
     let ws = null;
     let lastMessageTime = 0;
+    let isSubscribed = false;
 
     const connectWebSocket = () => {
       if (!isPlaying) return;
 
+      // Close existing connection if any
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+
       ws = new WebSocket(`wss://stream.binance.com:9443/ws/${selectedSymbol.toLowerCase()}@bookTicker`);
+      
+      ws.onopen = () => {
+        console.log(`WebSocket connected for ${selectedSymbol}`);
+        isSubscribed = true;
+      };
+
+      ws.onclose = () => {
+        console.log(`WebSocket disconnected for ${selectedSymbol}`);
+        isSubscribed = false;
+      };
+
+      ws.onerror = (error) => {
+        console.error(`WebSocket error for ${selectedSymbol}:`, error);
+        isSubscribed = false;
+      };
       
       ws.onmessage = (event) => {
         const currentTime = Date.now();
@@ -286,20 +313,37 @@ function App() {
           setTimeout(() => setFlashAsk(false), 500);
         }
 
-        // 3. Process both bid and ask updates independently
+        // 3. Process both bid and ask updates
         const currentToneTime = now();
         
+        // Always update statistics for both if they have updates
         if (newBidQty > 0) {
           console.log('New bid quantity:', newBidQty, 'Previous:', prevMarketData.B, 'Current:', data.B);
           updateStats(newBidQty, true);
-          playSound(newBidQty, true, currentToneTime);
         }
-
         if (newAskQty > 0) {
           console.log('New ask quantity:', newAskQty, 'Previous:', prevMarketData.A, 'Current:', data.A);
           updateStats(newAskQty, false);
-          // Add a small offset for ask sounds to prevent timing conflicts
-          playSound(newAskQty, false, currentToneTime + 0.05);
+        }
+
+        // Play sound for one of them based on alternating pattern
+        if (newBidQty > 0 || newAskQty > 0) {
+          if (newBidQty > 0 && newAskQty > 0) {
+            // Both have updates, use alternating pattern
+            if (playBidNext) {
+              playSound(newBidQty, true, currentToneTime);
+            } else {
+              playSound(newAskQty, false, currentToneTime);
+            }
+            setPlayBidNext(!playBidNext);
+          } else {
+            // Only one has an update, play that one
+            if (newBidQty > 0) {
+              playSound(newBidQty, true, currentToneTime);
+            } else {
+              playSound(newAskQty, false, currentToneTime);
+            }
+          }
         }
 
         setPrevMarketData(data);
@@ -310,6 +354,7 @@ function App() {
 
     return () => {
       if (ws) {
+        isSubscribed = false;
         ws.close();
       }
     };
@@ -350,7 +395,7 @@ function App() {
         <div className="controls">
           <select 
             value={selectedSymbol}
-            onChange={(e) => setSelectedSymbol(e.target.value)}
+            onChange={(e) => handleSymbolChange(e.target.value)}
           >
             <optgroup label="USDT Pairs">
               <option value="BTCUSDT">Bitcoin (BTC/USDT)</option>
