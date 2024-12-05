@@ -50,6 +50,7 @@ function App() {
     asks: { mean: 0, stdDev: 0 }
   });
   const playBidNext = useRef(true);
+  const audioRef = useRef(null);
 
   // Listen for system theme changes
   useEffect(() => {
@@ -293,7 +294,14 @@ function App() {
         await start();
         initializeSynth();
         console.log('Audio started');
+        if (audioRef.current) {
+          audioRef.current.play();
+        }
       } else {
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+        }
         if (synthRef.current) {
           synthRef.current.dispose();
           synthRef.current = null;
@@ -304,6 +312,20 @@ function App() {
       console.error('Error starting audio:', error);
     }
   };
+
+  useEffect(() => {
+    const handleUserInteraction = async () => {
+      await start();
+    };
+
+    window.addEventListener('click', handleUserInteraction);
+    window.addEventListener('touchstart', handleUserInteraction);
+
+    return () => {
+      window.removeEventListener('click', handleUserInteraction);
+      window.removeEventListener('touchstart', handleUserInteraction);
+    };
+  }, []);
 
   return (
     <div className={`App ${theme}`}>
@@ -389,6 +411,10 @@ function App() {
             </div>
           </div>
         )}
+
+        <audio ref={audioRef}>
+          <source src="/silence.mp3" type="audio/mp3"></source>
+        </audio>
 
       </header>
     </div>
