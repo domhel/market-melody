@@ -23,7 +23,7 @@ const pentatonicNotes = [
 
 const MAX_HISTORY_SIZE = 100; // Maximum number of data points to keep
 const MIDDLE_NOTE_INDEX = Math.floor(pentatonicNotes.length / 2);
-const MIN_TIME_BETWEEN_SOUNDS = 0.25; // Increase minimum time between sounds to 250ms
+const MIN_TIME_BETWEEN_SOUNDS = 1/8; // Increase minimum time between sounds to 250ms
 
 function App() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -31,7 +31,7 @@ function App() {
   const [marketData, setMarketData] = useState({ b: '0', B: '0', a: '0', A: '0' });
   const [flashBid, setFlashBid] = useState(false);
   const [flashAsk, setFlashAsk] = useState(false);
-  const [lastPlayTime, setLastPlayTime] = useState(0);
+  let lastPlayTime = 0.0;
   const [prevMarketData, setPrevMarketData] = useState({ b: '0', B: '0', a: '0', A: '0' });
   const synthRef = useRef(null);
   const [theme, setTheme] = useState(() => {
@@ -185,7 +185,7 @@ function App() {
       const frequency = mapQuantityToNote(quantity, isBid);
       const volume = -12;
       synthRef.current.triggerAttackRelease(frequency, '0.15', currentTime, Math.pow(10, volume/20));
-      setLastPlayTime(currentTime);
+      lastPlayTime = currentTime;
       return true;
     } catch (error) {
       console.warn('Sound playback error:', error);
@@ -237,9 +237,6 @@ function App() {
       
       ws.onmessage = (event) => {
         const currentTime = Date.now();
-        if (currentTime - lastMessageTime < 100) {
-          return;
-        }
         lastMessageTime = currentTime;
 
         const data = JSON.parse(event.data);
