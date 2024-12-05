@@ -1,6 +1,29 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Synth, now, start } from 'tone';
 import './App.css';
+
+// Define pentatonic scale frequencies (A minor pentatonic)
+const pentatonicNotes = [
+  146.83,  // D3
+  165.00,  // E3
+  196.00,  // G3
+  220.00,  // A3
+  261.63,  // C4
+  293.66,  // D4
+  329.63,  // E4
+  392.00,  // G4
+  440.00,  // A4
+  523.25,  // C5
+  587.33,  // D5
+  659.25,  // E5
+  783.99,  // G5
+  880.00,  // A5
+  1046.50  // C6
+];
+
+const MAX_HISTORY_SIZE = 100; // Maximum number of data points to keep
+const MIDDLE_NOTE_INDEX = Math.floor(pentatonicNotes.length / 2);
+const MIN_TIME_BETWEEN_SOUNDS = 0.25; // Increase minimum time between sounds to 250ms
 
 function App() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -21,6 +44,14 @@ function App() {
       return 'dark';
     }
     return 'light';
+  });
+  const [quantityHistory, setQuantityHistory] = useState({
+    bids: [],
+    asks: []
+  });
+  const statsRef = useRef({
+    bids: { mean: 0, stdDev: 0 },
+    asks: { mean: 0, stdDev: 0 }
   });
 
   // Listen for system theme changes
@@ -75,20 +106,6 @@ function App() {
     };
   }, []);
 
-  // Define pentatonic scale frequencies (A minor pentatonic)
-  const pentatonicNotes = [
-    220.00,  // A3
-    261.63,  // C4
-    293.66,  // D4
-    329.63,  // E4
-    392.00,  // G4
-    440.00,  // A4
-    523.25,  // C5
-    587.33,  // D5
-    659.25,  // E5
-    783.99   // G5
-  ];
-
   const getNewOrderQuantity = (currentQty, prevQty) => {
     const current = parseFloat(currentQty);
     const prev = parseFloat(prevQty);
@@ -100,61 +117,137 @@ function App() {
     return 0;
   };
 
-  const mapQuantityToNote = (quantity) => {
-    // More sensitive scaling for different quantity ranges
-    let index;
-    if (quantity < 0.1) {
-      // Very small orders: first two notes
-      index = Math.floor(quantity * 20) % 2;
-    } else if (quantity < 1) {
-      // Small orders: first four notes
-      index = Math.floor(quantity * 4) % 4;
-    } else if (quantity < 10) {
-      // Medium orders: middle range
-      index = 2 + Math.floor(Math.log2(quantity) * 2);
-    } else if (quantity < 100) {
-      // Large orders: higher notes
-      index = 5 + Math.floor(Math.log10(quantity));
+  const processMarketData = (newData, prevData) => {
+    const newBidQty = getNewOrderQuantity(newData.B, prevData.B);
+    const newAskQty = getNewOrderQuantity(newData.A, prevData.A);
+    
+    let orderUpdate = null;
+    
+    if (newBidQty > 0 || newAskQty > 0) {
+      const isBid = newBidQty > newAskQty;
+      const quantity = isBid ? newBidQty : newAskQty;
+      
+      orderUpdate = {
+        type: isBid ? 'bids' : 'asks',
+        quantity,
+        price: isBid ? newData.b : newData.a
+      };
+    }
+    
+    return {
+      orderUpdate,
+      priceUpdates: {
+        bidChanged: newData.b !== prevData.b,
+        askChanged: newData.a !== prevData.a
+      }
+    };
+  };
+
+  const handleOrderUpdate = (orderUpdate, updateStats, playSound) => {
+    if (!orderUpdate) return;
+    
+    const { type, quantity } = orderUpdate;
+    const isBid = type === 'bids';
+    
+    // Update statistics
+    updateStats(quantity, isBid);
+    
+    // Play sound
+    playSound(quantity, isBid);
+  };
+
+  const updateStats = useCallback((newQuantity, isBid) => {
+    setQuantityHistory(prev => {
+      const type = isBid ? 'bids' : 'asks';
+      const newHistory = {
+        ...prev,
+        [type]: [...prev[type], newQuantity].slice(-MAX_HISTORY_SIZE)
+      };
+      
+      const currentHistory = newHistory[type];
+      
+      // Calculate mean
+      const mean = currentHistory.reduce((sum, val) => sum + val, 0) / currentHistory.length;
+      
+      // Calculate standard deviation
+      const variance = currentHistory.reduce((sum, val) => {
+        const diff = val - mean;
+        return sum + (diff * diff);
+      }, 0) / currentHistory.length;
+      const stdDev = Math.sqrt(variance);
+
+      statsRef.current[type] = { mean, stdDev };
+      console.log(`${type.toUpperCase()} Stats updated - Mean: ${mean.toFixed(2)}, StdDev: ${stdDev.toFixed(2)}, Current Qty: ${newQuantity.toFixed(2)}`);
+      return newHistory;
+    });
+  }, []);
+
+  const mapQuantityToNote = (quantity, isBid) => {
+    const type = isBid ? 'bids' : 'asks';
+    const stats = statsRef.current[type];
+    
+    // If we don't have enough data yet, use a default mapping
+    if (quantityHistory[type].length < 2) {
+      return pentatonicNotes[MIDDLE_NOTE_INDEX];
+    }
+
+    // Calculate z-score
+    const zScore = (quantity - stats.mean) / (stats.stdDev || 1);
+    
+    // Map z-score to [0,1] range using a modified approach
+    // This will give more spread across the available notes
+    let normalized;
+    if (Math.abs(zScore) <= 0.5) {
+      // Within 0.5 standard deviation - map to middle fifth of range
+      normalized = 0.4 + (zScore + 0.5) * 0.2; // Maps [-0.5,0.5] to [0.4,0.6]
+    } else if (Math.abs(zScore) <= 1.5) {
+      // Between 0.5 and 1.5 standard deviations
+      if (zScore > 0) {
+        normalized = 0.6 + (zScore - 0.5) * 0.2; // Maps [0.5,1.5] to [0.6,0.8]
+      } else {
+        normalized = 0.4 - (Math.abs(zScore) - 0.5) * 0.2; // Maps [-1.5,-0.5] to [0.2,0.4]
+      }
     } else {
-      // Very large orders: highest notes
-      index = 8;
+      // Beyond 1.5 standard deviations
+      if (zScore > 0) {
+        normalized = Math.min(1, 0.8 + (zScore - 1.5) * 0.133); // Maps [1.5,∞] to [0.8,1]
+      } else {
+        normalized = Math.max(0, 0.2 - (Math.abs(zScore) - 1.5) * 0.133); // Maps [-∞,-1.5] to [0,0.2]
+      }
+    }
+    
+    // Calculate index based on whether it's a bid or ask
+    let index;
+    const halfLength = Math.floor(pentatonicNotes.length / 2);
+    if (isBid) {
+      // Bids use upper half of notes
+      index = halfLength + Math.floor(normalized * halfLength);
+    } else {
+      // Asks use lower half of notes
+      index = Math.floor(normalized * halfLength);
     }
     
     // Ensure index stays within bounds
-    index = Math.max(0, Math.min(9, index));
+    index = Math.max(0, Math.min(pentatonicNotes.length - 1, index));
+    
+    console.log(`${type.toUpperCase()} Note mapping - Quantity: ${quantity.toFixed(2)}, Z-Score: ${zScore.toFixed(2)}, Normalized: ${normalized.toFixed(2)}, Index: ${index}, StdDev: ${stats.stdDev.toFixed(2)}`);
     return pentatonicNotes[index];
   };
 
-  const playTradeSound = (data) => {
-    if (!synthRef.current) return;
-
-    const currentTime = now();
-    if (currentTime - lastPlayTime < 0.1) {
-      return;
+  const playSound = (quantity, isBid, currentTime) => {
+    if (!synthRef.current || (currentTime - lastPlayTime < MIN_TIME_BETWEEN_SOUNDS)) {
+      return false;
     }
 
     try {
-      // Calculate new order quantities
-      const newBidQty = getNewOrderQuantity(data.B, prevMarketData.B);
-      const newAskQty = getNewOrderQuantity(data.A, prevMarketData.A);
-
-      // Play sound only if there's a new order
-      if (newBidQty > 0 || newAskQty > 0) {
-        // Use the larger of the new orders for the note
-        const quantity = Math.max(newBidQty, newAskQty);
-        const frequency = mapQuantityToNote(quantity);
-        
-        // Keep volume constant for clarity
-        const volume = -12;
-
-        synthRef.current.triggerAttackRelease(frequency, '0.15', currentTime, Math.pow(10, volume/20));
-        setLastPlayTime(currentTime);
-      }
-
-      // Update previous market data
-      setPrevMarketData(data);
+      const frequency = mapQuantityToNote(quantity, isBid);
+      const volume = -12;
+      synthRef.current.triggerAttackRelease(frequency, '0.15', currentTime, Math.pow(10, volume/20));
+      setLastPlayTime(currentTime);
+      return true;
     } catch (error) {
       console.warn('Sound playback error:', error);
+      return false;
     }
   };
 
@@ -169,24 +262,47 @@ function App() {
       
       ws.onmessage = (event) => {
         const currentTime = Date.now();
-        // Reduce throttle time to hear more events
         if (currentTime - lastMessageTime < 100) {
           return;
         }
         lastMessageTime = currentTime;
 
         const data = JSON.parse(event.data);
+        
+        // 1. Update UI with current data
         setMarketData(data);
-        // Trigger flash animation
-        if (data.b !== marketData.b) {
+        
+        // 2. Process order quantities and update stats
+        const newBidQty = getNewOrderQuantity(data.B, prevMarketData.B);
+        const newAskQty = getNewOrderQuantity(data.A, prevMarketData.A);
+        
+        // Update flash animations for price changes
+        if (data.b !== prevMarketData.b) {
           setFlashBid(true);
           setTimeout(() => setFlashBid(false), 500);
         }
-        if (data.a !== marketData.a) {
+        if (data.a !== prevMarketData.a) {
           setFlashAsk(true);
           setTimeout(() => setFlashAsk(false), 500);
         }
-        playTradeSound(data);
+
+        // 3. Process both bid and ask updates independently
+        const currentToneTime = now();
+        
+        if (newBidQty > 0) {
+          console.log('New bid quantity:', newBidQty, 'Previous:', prevMarketData.B, 'Current:', data.B);
+          updateStats(newBidQty, true);
+          playSound(newBidQty, true, currentToneTime);
+        }
+
+        if (newAskQty > 0) {
+          console.log('New ask quantity:', newAskQty, 'Previous:', prevMarketData.A, 'Current:', data.A);
+          updateStats(newAskQty, false);
+          // Add a small offset for ask sounds to prevent timing conflicts
+          playSound(newAskQty, false, currentToneTime + 0.05);
+        }
+
+        setPrevMarketData(data);
       };
     };
 
