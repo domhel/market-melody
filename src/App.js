@@ -22,7 +22,7 @@ const pentatonicNotes = [
 ];
 
 const MAX_HISTORY_SIZE = 100; // Maximum number of data points to keep
-const MIN_TIME_BETWEEN_SOUNDS = 1 / 8; // Increase minimum time between sounds to 250ms
+const MIN_TIME_BETWEEN_SOUNDS = 1 / 16; // Increase minimum time between sounds to 250ms
 
 function App() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -332,7 +332,6 @@ function App() {
               <option value="XRPUSDT">Ripple (XRP/USDT)</option>
               <option value="ADAUSDT">Cardano (ADA/USDT)</option>
               <option value="DOGEUSDT">Dogecoin (DOGE/USDT)</option>
-              <option value="MATICUSDT">Polygon (MATIC/USDT)</option>
               <option value="DOTUSDT">Polkadot (DOT/USDT)</option>
               <option value="AVAXUSDT">Avalanche (AVAX/USDT)</option>
               <option value="LINKUSDT">Chainlink (LINK/USDT)</option>
@@ -360,7 +359,6 @@ function App() {
               <option value="BNBETH">Binance Coin (BNB/ETH)</option>
               <option value="SOLETH">Solana (SOL/ETH)</option>
               <option value="LINKETH">Chainlink (LINK/ETH)</option>
-              <option value="MATICETH">Polygon (MATIC/ETH)</option>
               <option value="ATOMETH">Cosmos (ATOM/ETH)</option>
               <option value="AVAXETH">Avalanche (AVAX/ETH)</option>
               <option value="AAVEETH">Aave (AAVE/ETH)</option>
@@ -369,15 +367,7 @@ function App() {
               <option value="SOLBNB">Solana (SOL/BNB)</option>
               <option value="ADABNB">Cardano (ADA/BNB)</option>
               <option value="DOTBNB">Polkadot (DOT/BNB)</option>
-              <option value="MATICBNB">Polygon (MATIC/BNB)</option>
               <option value="ATOMBNB">Cosmos (ATOM/BNB)</option>
-            </optgroup>
-            <optgroup label="BUSD Pairs">
-              <option value="BTCBUSD">Bitcoin (BTC/BUSD)</option>
-              <option value="ETHBUSD">Ethereum (ETH/BUSD)</option>
-              <option value="BNBBUSD">Binance Coin (BNB/BUSD)</option>
-              <option value="SOLBUSD">Solana (SOL/BUSD)</option>
-              <option value="ADABUSD">Cardano (ADA/BUSD)</option>
             </optgroup>
           </select>
           <button onClick={handleStartStop}>
