@@ -22,8 +22,7 @@ const pentatonicNotes = [
 ];
 
 const MAX_HISTORY_SIZE = 100; // Maximum number of data points to keep
-const MIDDLE_NOTE_INDEX = Math.floor(pentatonicNotes.length / 2);
-const MIN_TIME_BETWEEN_SOUNDS = 1/8; // Increase minimum time between sounds to 250ms
+const MIN_TIME_BETWEEN_SOUNDS = 1 / 8; // Increase minimum time between sounds to 250ms
 
 function App() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -38,17 +37,14 @@ function App() {
     // Check localStorage first
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) return savedTheme;
-    
+
     // Then check system preference
     if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
       return 'dark';
     }
     return 'light';
   });
-  const [quantityHistory, setQuantityHistory] = useState({
-    bids: [],
-    asks: []
-  });
+  const quantityHistoryRef = useRef({ bids: [], asks: [] });
   const statsRef = useRef({
     bids: { mean: 0, stdDev: 0 },
     asks: { mean: 0, stdDev: 0 }
@@ -108,37 +104,41 @@ function App() {
   }, []);
 
   const updateStats = useCallback((newQuantity, isBid) => {
-    setQuantityHistory(prev => {
-      const type = isBid ? 'bids' : 'asks';
-      const newHistory = {
-        ...prev,
-        [type]: [...prev[type], newQuantity].slice(-MAX_HISTORY_SIZE)
-      };
-      
-      const currentHistory = newHistory[type];
-      
-      // Calculate mean
-      const mean = currentHistory.reduce((sum, val) => sum + val, 0) / currentHistory.length;
-      
-      // Calculate standard deviation
-      const variance = currentHistory.reduce((sum, val) => {
-        const diff = val - mean;
-        return sum + (diff * diff);
-      }, 0) / currentHistory.length;
-      const stdDev = Math.sqrt(variance);
+    const type = isBid ? 'bids' : 'asks';
+    const currentHistory = quantityHistoryRef.current[type];
 
-      statsRef.current[type] = { mean, stdDev };
-      console.log(`${type.toUpperCase()} Stats updated - Mean: ${mean.toFixed(2)}, StdDev: ${stdDev.toFixed(2)}, Current Qty: ${newQuantity.toFixed(2)}`);
-      return newHistory;
-    });
+    // Update history directly
+    currentHistory.push(newQuantity);
+    if (currentHistory.length > MAX_HISTORY_SIZE) {
+      currentHistory.shift();
+    }
+
+    // Calculate statistics
+    const mean = currentHistory.reduce((sum, val) => sum + val, 0) / currentHistory.length;
+    const variance = currentHistory.reduce((sum, val) => {
+      const diff = val - mean;
+      return sum + (diff * diff);
+    }, 0) / currentHistory.length;
+    const stdDev = Math.sqrt(variance);
+
+    statsRef.current[type] = { mean, stdDev };
   }, []);
+
+  // Update handleSymbolChange
+  const handleSymbolChange = (newSymbol) => {
+    quantityHistoryRef.current = { bids: [], asks: [] };
+    statsRef.current = { bids: { mean: 0, stdDev: 0 }, asks: { mean: 0, stdDev: 0 } };
+    setPrevMarketData({ b: '0', B: '0', a: '0', A: '0' });
+    setMarketData({ b: '0', B: '0', a: '0', A: '0' });
+    setSelectedSymbol(newSymbol);
+  };
 
   const mapQuantityToNote = (quantity, isBid) => {
     const type = isBid ? 'bids' : 'asks';
     const stats = statsRef.current[type];
-    
+
     // If we don't have enough data yet, use middle of appropriate half
-    if (quantityHistory[type].length < 2) {
+    if (quantityHistoryRef.current[type].length < 2) {
       if (isBid) {
         return pentatonicNotes[Math.floor(pentatonicNotes.length * 0.75)]; // Middle of upper half
       } else {
@@ -150,14 +150,14 @@ function App() {
     const zScore = (quantity - stats.mean) / (stats.stdDev || 1);
     // Clamp z-score to reasonable range (-2 to 2)
     const clampedZScore = Math.max(-2, Math.min(2, zScore));
-    
+
     // Map z-score to [0,1] range for the appropriate half
     const normalized = (clampedZScore + 2) / 4; // Maps [-2,2] to [0,1]
-    
+
     // Calculate index based on whether it's a bid or ask
     const halfLength = Math.floor(pentatonicNotes.length / 2);
     let index;
-    
+
     if (isBid) {
       // Bids use upper half [halfLength to length-1]
       index = halfLength + Math.floor(normalized * (pentatonicNotes.length - halfLength));
@@ -167,11 +167,11 @@ function App() {
       const invertedNormalized = 1 - normalized;
       index = Math.floor(invertedNormalized * halfLength);
     }
-    
+
     // Ensure index stays within bounds
-    index = Math.max(isBid ? halfLength : 0, 
-                    Math.min(isBid ? pentatonicNotes.length - 1 : halfLength - 1, index));
-    
+    index = Math.max(isBid ? halfLength : 0,
+      Math.min(isBid ? pentatonicNotes.length - 1 : halfLength - 1, index));
+
     console.log(`${type.toUpperCase()} Note mapping - Quantity: ${quantity.toFixed(2)}, Z-Score: ${zScore.toFixed(2)}, Normalized: ${normalized.toFixed(2)}, Index: ${index}, StdDev: ${stats.stdDev.toFixed(2)}`);
     return pentatonicNotes[index];
   };
@@ -184,28 +184,13 @@ function App() {
     try {
       const frequency = mapQuantityToNote(quantity, isBid);
       const volume = -12;
-      synthRef.current.triggerAttackRelease(frequency, '0.15', currentTime, Math.pow(10, volume/20));
+      synthRef.current.triggerAttackRelease(frequency, '0.15', currentTime, Math.pow(10, volume / 20));
       lastPlayTime = currentTime;
       return true;
     } catch (error) {
       console.warn('Sound playback error:', error);
       return false;
     }
-  };
-
-  const handleSymbolChange = (newSymbol) => {
-    // Reset statistics and history for the new symbol
-    setQuantityHistory({
-      bids: [],
-      asks: []
-    });
-    statsRef.current = {
-      bids: { mean: 0, stdDev: 0 },
-      asks: { mean: 0, stdDev: 0 }
-    };
-    setPrevMarketData({ b: '0', B: '0', a: '0', A: '0' });
-    setMarketData({ b: '0', B: '0', a: '0', A: '0' });
-    setSelectedSymbol(newSymbol);
   };
 
   useEffect(() => {
@@ -222,7 +207,7 @@ function App() {
       }
 
       ws = new WebSocket(`wss://stream.binance.com:9443/ws/${selectedSymbol.toLowerCase()}@bookTicker`);
-      
+
       ws.onopen = () => {
         console.log(`WebSocket connected for ${selectedSymbol}`);
       };
@@ -234,20 +219,20 @@ function App() {
       ws.onerror = (error) => {
         console.error(`WebSocket error for ${selectedSymbol}:`, error);
       };
-      
+
       ws.onmessage = (event) => {
         const currentTime = Date.now();
         lastMessageTime = currentTime;
 
         const data = JSON.parse(event.data);
-        
+
         // 1. Update UI with current data
         setMarketData(data);
-        
+
         // 2. Get current quantities directly
         const bidQty = parseFloat(data.B);
         const askQty = parseFloat(data.A);
-        
+
         // Update flash animations for price changes
         if (data.b !== prevMarketData.b) {
           setFlashBid(true);
@@ -260,7 +245,7 @@ function App() {
 
         // 3. Process both bid and ask updates
         const currentToneTime = now();
-        
+
         // Always update statistics for both
         if (bidQty > 0) {
           console.log('Bid quantity:', bidQty);
@@ -328,8 +313,8 @@ function App() {
         <div className="logo-container">
           <span className="app-logo">♫</span>
           <span className="logo-text">MarketMelody</span>
-          <button 
-            className="theme-toggle" 
+          <button
+            className="theme-toggle"
             onClick={toggleTheme}
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
           >
@@ -337,7 +322,7 @@ function App() {
           </button>
         </div>
         <div className="controls">
-          <select 
+          <select
             value={selectedSymbol}
             onChange={(e) => handleSymbolChange(e.target.value)}
           >
@@ -401,7 +386,7 @@ function App() {
             {isPlaying ? 'Stop' : 'Start'} Market Music
           </button>
         </div>
-        
+
         {isPlaying && (
           <div className="market-display">
             <div className={`price-column bid-column ${flashBid ? 'flash' : ''}`}>
